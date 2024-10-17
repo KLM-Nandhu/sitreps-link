@@ -5,6 +5,10 @@ import re
 from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Set OpenAI API key from environment variable
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -36,16 +40,18 @@ def scrape_website(url):
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
         
-        # Extract relevant information from the webpage
-        # This is a placeholder and needs to be adjusted based on the actual structure of the website
-        status = soup.find('div', class_='status').text.strip()
-        details = soup.find('div', class_='details').text.strip()
+        # Extract all text content from the page
+        content = soup.get_text(separator='\n', strip=True)
         
-        return f"Status: {status}\nDetails: {details}"
+        # Remove any excessive newlines or spaces
+        content = re.sub(r'\n+', '\n', content)
+        content = re.sub(r' +', ' ', content)
+        
+        return content
     except Exception as e:
         return f"Error scraping website: {str(e)}"
 
-def generate_response(sitrep_info, full_content, scraped_info):
+def generate_response(sitrep_info, scraped_content):
     current_time = datetime.utcnow() + timedelta(hours=1)  # Assuming GMT+1
     response_time = current_time.strftime("%a, %d %b %Y %H:%M:%S GMT")
 
@@ -54,7 +60,7 @@ def generate_response(sitrep_info, full_content, scraped_info):
 
     SITREP TITLE: {sitrep_info['title']}
     QUERY: {sitrep_info['query']}
-    SCRAPED INFO: {scraped_info}
+    SCRAPED CONTENT: {scraped_content}
 
     Generate a response that covers the following points concisely:
     1. Acknowledge the query and provide context about the alert or issue.
@@ -68,7 +74,7 @@ def generate_response(sitrep_info, full_content, scraped_info):
     {sitrep_info['name']}, {response_time}
     [Balanced response covering the points above]
 
-    Aim for a response of about 150-200 words. Focus on providing valuable insights and practical recommendations without excessive detail.
+    Aim for a response of about 200-250 words. Focus on providing valuable insights and practical recommendations based on the scraped content.
     """
 
     response = openai.ChatCompletion.create(
@@ -84,9 +90,9 @@ def generate_response(sitrep_info, full_content, scraped_info):
 def process_sitrep(content):
     try:
         sitrep_info = extract_sitrep_info(content)
-        scraped_info = scrape_website(sitrep_info['link'])
-        response = generate_response(sitrep_info, content, scraped_info)
-        return sitrep_info['query'], response, scraped_info
+        scraped_content = scrape_website(sitrep_info['link'])
+        response = generate_response(sitrep_info, scraped_content)
+        return sitrep_info['query'], response, scraped_content
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
         return "Error in processing", "Unable to generate a response due to an error. Please check the sitrep content and try again.", ""
@@ -104,11 +110,11 @@ def main():
         if not content:
             st.error("Please provide the Sitrep content.")
         else:
-            query, response, scraped_info = process_sitrep(content)
+            query, response, scraped_content = process_sitrep(content)
             st.subheader("Identified Query or Context")
             st.markdown(query)
-            st.subheader("Scraped Information")
-            st.markdown(scraped_info)
+            st.subheader("Scraped Content")
+            st.markdown(scraped_content[:500] + "..." if len(scraped_content) > 500 else scraped_content)
             st.subheader("Generated Response")
             st.markdown(response)
 
